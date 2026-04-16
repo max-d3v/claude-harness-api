@@ -1,4 +1,4 @@
-# Claude Harness API
+# Claude Harness API 🦹
 
 Imma rawdog this README, AI text is soulless 🤖 (used chatgpt to format the .md)
 
