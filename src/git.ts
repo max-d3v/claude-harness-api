@@ -54,11 +54,11 @@ export async function openPR(
   body: string,
 ): Promise<string> {
   const result = await $`gh pr create \
-    --repo ${ctx.project} \
     --head ${ctx.branch} \
     --base ${ctx.originBranch} \
     --title ${title} \
-    --body ${body}`.cwd(ctx.worktreePath).text();
+    --body ${body} \
+    --draft`.cwd(ctx.worktreePath).text();
   return result.trim();
 }
 
@@ -70,4 +70,38 @@ export async function getDiff(project: string, originBranch: string): Promise<st
 export async function getDiffStat(project: string, originBranch: string): Promise<string> {
   const stat = await $`git -C ${project} diff --stat origin/${originBranch}`.text();
   return stat.trim();
+}
+
+export interface PRInfo {
+  number: number;
+  title: string;
+  baseBranch: string;
+  headBranch: string;
+  url: string;
+}
+
+export async function getPRInfo(project: string, pr: string | number): Promise<PRInfo> {
+  const json = await $`gh pr view ${pr} --json number,title,baseRefName,headRefName,url`.cwd(project).text();
+  const data = JSON.parse(json);
+  return {
+    number: data.number,
+    title: data.title,
+    baseBranch: data.baseRefName,
+    headBranch: data.headRefName,
+    url: data.url,
+  };
+}
+
+export async function getPRDiff(project: string, pr: string | number): Promise<string> {
+  const diff = await $`gh pr diff ${pr}`.cwd(project).text();
+  return diff.trim();
+}
+
+export async function getPRDiffStat(project: string, pr: string | number): Promise<string> {
+  const stat = await $`gh pr diff ${pr} --name-only`.cwd(project).text();
+  return stat.trim();
+}
+
+export async function commentOnPR(project: string, pr: string | number, body: string): Promise<void> {
+  await $`gh pr review ${pr} --comment --body ${body}`.cwd(project).quiet();
 }

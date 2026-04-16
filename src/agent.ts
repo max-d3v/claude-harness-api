@@ -1,5 +1,14 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createWorktree, commitAndPush, openPR } from "./git.js";
+import { homedir } from "os";
+import path from "path";
+
+export function resolvePath(p: string): string {
+  if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
+  if (p.startsWith("~")) return path.join(homedir(), "..", p.slice(1));
+  if (!path.isAbsolute(p)) return path.join(homedir(), p);
+  return path.resolve(p);
+}
 
 export interface AgentOptions {
   prompt: string;
@@ -55,7 +64,8 @@ function extractSessionId(message: any): string | undefined {
 }
 
 export async function queryAgent(opts: AgentOptions): Promise<AgentResult> {
-  const ctx = await createWorktree(opts.project, opts.originBranch);
+  const project = resolvePath(opts.project);
+  const ctx = await createWorktree(project, opts.originBranch);
 
   try {
     let result = "";
@@ -76,7 +86,9 @@ export async function queryAgent(opts: AgentOptions): Promise<AgentResult> {
       await commitAndPush(ctx, title);
       try {
         prUrl = await openPR(ctx, title, result.slice(0, 4000));
-      } catch {}
+      } catch (err) {
+        console.error("[openPR] Failed to create PR:", err);
+      }
     }
 
     return { result, sessionId, prUrl, branch: ctx.branch };
@@ -91,11 +103,12 @@ export async function queryAgentReadOnly(
   let result = "";
   let sessionId: string | undefined;
 
+  const project = resolvePath(opts.project);
   for await (const msg of query({
     prompt: opts.prompt,
     options: buildSdkOptions(
       { ...opts, originBranch: opts.originBranch ?? "main" } as AgentOptions,
-      opts.project,
+      project,
     ),
   })) {
     sessionId ??= extractSessionId(msg);
