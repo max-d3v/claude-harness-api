@@ -65,29 +65,27 @@ response:
 
 # Defaults and more details
 
-Each mode has its own default model, reasoning effort, tools, etc.
+Each mode has defaults to opus with high reasoning effort, But can pass your own preferences in each request.
 
-I would not recommend passing tools, since each mode already has predetermined ones, but you can change models if you see fit.
+Each mode has their set of tools, prompt with all and code-review with read-only tools.
 
-All models default to Opus with high reasoning.
-
-You can persist sessions, but I’m against it. If you have a problem big enough that Opus with high reasoning can’t solve it, just use your t3code locally and go at it.
+You can persist sessions, but I’m against it. If you have a problem big enough that Opus with high reasoning can’t one shot, just use your t3code locally and go at it.
 
 # Why?
 
 Like I already said, this makes autonomous coding agents way cheaper for 2 reasons:
 
 1. **Using your own computer to run queries**  
-   Since all this does is use Claude Code, which is not heavy, there’s no heavy load here.
+   Since all this does is use Claude Code, which is not heavy, there’s no heavy load.
 
 2. **Using a Claude Code plan**  
-   APIs from Anthropic, OpenAI, etc. are usage-cost based, so depending on your plan, they can be 5x–10x more expensive per token.
+   APIs from Anthropic, OpenAI, etc. are usage-cost based, so depending on your plan, they can be 5x–10x more expensive per token than your subscription.
 
 This also makes code reviewers better for one reason:
 
-I know the Claude Code harness is not the best, but it’s still made by the creators of the model, so even with high token spendage, I deem it a good harness. IDGAF.
+I know people say Claude Code is not the best harness, but it’s still made by the creators of the model, so even with high token spendage, I deem it a good harness. IDGAF.
 
-Most code reviewers use old harnesses or some BS to get context on the project and perform agentic loops. Their only advantage is maybe that they have better code review prompts, which are a small part of the results.
+SaaS code reviewers (like code rabbit, greptile etc.) use their own harnesses (unreliable), worst models (You can use opus here which i deem the best model for coding) and super expensive monthly plans (obviously, they have to pay usage-based tokens for their model inference). Their only advantage is maybe that they have better code review prompts, which are a small part of the results.
 
 # How I will use it
 
@@ -95,7 +93,7 @@ First, keep in mind that all git actions taken from this API are done as the log
 
 I’ll expose this via ngrok for integrations with Linear and GitHub.
 
-I’ll use `/prompt` for small, well-described Linear problems. You can use your own information hub.
+I’ll use `/prompt` for small, well-described Linear problems that i think opus can one-shot. You can use your own information hub like jira or sum other bs.
 
 I’ll use `/mode/code-review` for every PR opened in the projects I choose, via GitHub Actions just calling this API with the necessary info.
 
