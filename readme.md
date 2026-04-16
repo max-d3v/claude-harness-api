@@ -1,13 +1,104 @@
 # Claude Harness API
 
-Use your claude subscripion plan + a http wrapper with some logic and predefined resources to make your life easier.
+Imma rawdog this README, AI text is soulless 🤖 (used chatgpt to format the .md)
 
-MODES:
+Use your Claude subscription plan through an HTTP wrapper to make autonomous coding agents for 1/5 of the price.
 
-Prompt:
-Given your prompt, project and origin branch, will create a worktree, apply changes and open a draft PR.
+# Prerequisites
 
-Code review:
-Given a PR and project, will analyze PR with my code reviewer prompt and add a comment with the review.
+- Bun
+- Logged-in Claude CLI
+- Logged-in GitHub CLI
 
-Keep in mind all git actions taken from this API are from the logged in user that is runnning this api.
+# Modes
+
+## Prompt
+
+Given your prompt, project, and origin branch, it will create a worktree, apply changes, and open a draft PR.
+
+## Code review
+
+Given a PR and project, it will analyze the PR with my code review prompt and add a comment with the review.
+
+# Examples
+
+## POST /prompt
+
+request:
+```json
+{
+  "prompt": "Implement a simple readme change - add a smiling face somewhere",
+  "project": "code/nextjs-boilerplate",
+  "originBranch": "main"
+}
+```
+
+response:
+```json
+{
+  "result": "Done! I added a 😊 smiling face to the main heading of `README.md`, so it now reads **# Orion Kit 😊**.",
+  "sessionId": "b837e493-007b-4102-8adc-0a33b67bb99a",
+  "prUrl": "https://github.com/max-d3v/orion-kit/pull/2",
+  "branch": "agent/main-38092eb7"
+}
+```
+
+## POST /mode/code-review
+
+request:
+```json
+{
+  "pr": 2,
+  "project": "code/nextjs-boilerplate"
+}
+```
+
+response:
+```json
+{
+  "result": "## PR Review: Add smiling face to README heading\n\nThis diff is clean. The change is a single-character emoji addition to the README title — no code, logic, security, or performance concerns apply.\n\n**One minor note:** Adding an emoji to a project heading (`# Orion Kit 😊`) is a stylistic/branding choice. If this is intentional and agreed upon by the team, it's fine to merge. Just confirm it aligns with the project's tone and that no downstream tooling (e.g., scripts that parse the README title, or `package.json` `name` field comparisons) depends on the exact heading text.\n\nNo issues to block this PR.",
+  "sessionId": "7207f92b-d5a3-4162-949c-90a25d26e737",
+  "prUrl": "https://github.com/max-d3v/orion-kit/pull/2",
+  "prNumber": 2
+}
+```
+
+# Defaults and more details
+
+Each mode has its own default model, reasoning effort, tools, etc.
+
+I would not recommend passing tools, since each mode already has predetermined ones, but you can change models if you see fit.
+
+All models default to Opus with high reasoning.
+
+You can persist sessions, but I’m against it. If you have a problem big enough that Opus with high reasoning can’t solve it, just use your t3code locally and go at it.
+
+# Why?
+
+Like I already said, this makes autonomous coding agents way cheaper for 2 reasons:
+
+1. **Using your own computer to run queries**  
+   Since all this does is use Claude Code, which is not heavy, there’s no heavy load here.
+
+2. **Using a Claude Code plan**  
+   APIs from Anthropic, OpenAI, etc. are usage-cost based, so depending on your plan, they can be 5x–10x more expensive per token.
+
+This also makes code reviewers better for one reason:
+
+I know the Claude Code harness is not the best, but it’s still made by the creators of the model, so even with high token spendage, I deem it a good harness. IDGAF.
+
+Most code reviewers use old harnesses or some BS to get context on the project and perform agentic loops. Their only advantage is maybe that they have better code review prompts, which are a small part of the results.
+
+# How I will use it
+
+First, keep in mind that all git actions taken from this API are done as the logged-in user running this API.
+
+I’ll expose this via ngrok for integrations with Linear and GitHub.
+
+I’ll use `/prompt` for small, well-described Linear problems. You can use your own information hub.
+
+I’ll use `/mode/code-review` for every PR opened in the projects I choose, via GitHub Actions just calling this API with the necessary info.
+
+# Will this get DMCA'd?
+
+Anthropic, if you are seeing this, please hire me. I’ll nuke this repo. Please Anthropic.
