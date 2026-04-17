@@ -1,0 +1,20 @@
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Request Code Review
+        env:
+          PROJECT_LOCAL_PATH: ${{ vars.project_local_path }}
+          CLAUDE_HARNESS_API_URL: ${{ vars.claude_harness_api_url }}
+        run: |
+          curl -X POST "${CLAUDE_HARNESS_API_URL}/mode/code-review" \
+            -H "Content-Type: application/json" \
+            -d "{\"pr\": \"${{ github.event.pull_request.number }}\", \"project\": \"${PROJECT_LOCAL_PATH}\"}" \
+            --fail --silent --show-error
