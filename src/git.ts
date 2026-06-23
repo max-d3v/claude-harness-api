@@ -408,6 +408,27 @@ const GitHubIssueCommentSchema = z.object({
   user: GitHubCommentUserSchema,
 });
 
+export async function pullRequestHasCommentOrReviewContaining(
+  project: string,
+  pullRequest: PRInfo,
+  needle: string,
+): Promise<boolean> {
+  const issueCommentsEndpoint = `repos/${pullRequest.owner}/${pullRequest.repo}/issues/${pullRequest.number}/comments`;
+  const reviewsEndpoint = `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews`;
+
+  const [issueCommentsJson, reviewsJson] = await Promise.all([
+    $`gh api ${issueCommentsEndpoint} --paginate --slurp`.cwd(project).text(),
+    $`gh api ${reviewsEndpoint} --paginate --slurp`.cwd(project).text(),
+  ]);
+
+  const issueCommentPages = z.array(z.array(GitHubIssueCommentSchema)).parse(JSON.parse(issueCommentsJson));
+  const reviewPages = z.array(z.array(GitHubPullRequestReviewSchema)).parse(JSON.parse(reviewsJson));
+
+  return [...issueCommentPages.flat(), ...reviewPages.flat()].some((comment) =>
+    (comment.body ?? "").includes(needle),
+  );
+}
+
 async function getPullRequestReviewComments(
   project: string,
   pullRequest: PRInfo,
