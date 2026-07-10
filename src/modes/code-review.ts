@@ -227,20 +227,18 @@ Do not use \`REQUEST_CHANGES\` for style nits, speculative concerns, questions w
 
   return `## Posting your review
 
-Post exactly one review to GitHub using the \`gh api\` command. The review must include:
-- an overall \`body\` with your high-level direction and summary of findings, and
-- a \`comments\` array with inline findings anchored to specific lines in the diff.
+Post exactly one review to GitHub using the \`gh api\` command. Only post real findings — concrete problems in this diff. Do not post summaries, recaps of what you looked at, verdicts, praise, positive notes, or nice-to-have observations. If there is nothing worth flagging, send a review with an empty \`comments\` array and an empty \`body\` — do not invent content to fill the review.
 
-${eventGuidance}
-
-Each entry in \`comments\` must reference a line that is part of this PR's diff:
+Every finding must be an inline comment anchored to a specific line in the diff. Each entry in \`comments\`:
 - \`path\` — repository-relative file path (matches the diff header).
-- \`body\` — the inline finding, written directly to the author.
+- \`body\` — the finding itself, written directly to the author. State the concrete problem and the change you want. No preamble, no restating the code, no closing pleasantries.
 - \`line\` — the line number the comment anchors to.
 - \`side\` — \`RIGHT\` for lines in the new revision (additions or context), \`LEFT\` for lines removed from the base.
 - For a multi-line range, also set \`start_line\` and \`start_side\` (\`line\`/\`side\` are the end of the range).
 
-Prefer inline comments for anything tied to a specific location. Reserve the top-level \`body\` for cross-cutting themes, structural observations, and the overall verdict. If you have no location-specific findings, send an empty \`comments\` array.
+Leave the top-level \`body\` empty (\`""\`) by default. Only use it for a real finding that genuinely cannot be anchored to any line in the diff (e.g. a missing file, or a structural issue that truly spans many locations and would be noise if repeated inline). Never use it to summarize or preface the inline findings, describe your process, or state an overall verdict.
+
+${eventGuidance}
 
 Write the JSON payload to a temp file and post it with:
 
@@ -254,7 +252,7 @@ Payload shape:
 
 \`\`\`json
 {
-  "body": "<overall review markdown>",
+  "body": "",
   "event": "COMMENT",
   "comments": [
     { "path": "src/foo.ts", "line": 42, "side": "RIGHT", "body": "..." }
