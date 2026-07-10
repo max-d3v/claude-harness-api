@@ -50,7 +50,8 @@ type ReviewDataSelector =
 const REVIEW_EXECUTOR_FAILURE_MARKER = "<!-- claude-harness:review-executor:failure -->";
 const UNCLEAN_WORKTREE_FAILURE_MARKER = "<!-- claude-harness:review-executor:unclean-worktree -->";
 
-const REVIEW_EXECUTOR_SYSTEM_PROMPT = `You are a review executor for GitHub pull requests.
+const REVIEW_EXECUTOR_SYSTEM_PROMPT = `
+You are a review executor for GitHub pull requests.
 
 You receive the review/comment payload that triggered this run, plus PR context.
 
@@ -82,6 +83,15 @@ class PreviousReviewExecutorFailureReportError extends Error {
   constructor(readonly selectorLabel: string) {
     super(`Review executor will not rerun a previous failure report: ${selectorLabel}`);
     this.name = "PreviousReviewExecutorFailureReportError";
+  }
+}
+
+class PullRequestBlockedByReviewExecutorFailureError extends Error {
+  constructor(readonly prNumber: number) {
+    super(
+      `PR #${prNumber} has an unresolved review executor failure comment; refusing to run. Delete the failure comment (or erase its hidden marker) to re-enable execution.`,
+    );
+    this.name = "PullRequestBlockedByReviewExecutorFailureError";
   }
 }
 
@@ -243,6 +253,8 @@ function buildFailureComment(message: string): string {
 
 The review executor could not complete the requested changes.
 
+If you want the review executor to run on this PR again, delete this comment or erase its hidden marker.
+
 \`\`\`
 ${clipForComment(message)}
 \`\`\``;
@@ -257,6 +269,14 @@ async function shouldPostFailureComment(input: {
     log(
       "reviewExecutor",
       `not posting failure comment: ${input.err.selectorLabel} is already a review-executor failure report`,
+    );
+    return false;
+  }
+
+  if (input.err instanceof PullRequestBlockedByReviewExecutorFailureError) {
+    log(
+      "reviewExecutor",
+      `not posting failure comment: PR #${input.err.prNumber} already has an unresolved review-executor failure comment`,
     );
     return false;
   }
@@ -322,6 +342,16 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
     const loadedPrInfo = await getPRInfo(project, input.pr);
     prInfo = loadedPrInfo;
     throwIfCancelled();
+
+    const prHasExistingFailure = await pullRequestHasCommentOrReviewContaining(
+      project,
+      prInfo,
+      REVIEW_EXECUTOR_FAILURE_MARKER,
+    );
+    throwIfCancelled();
+    if (prHasExistingFailure) {
+      throw new PullRequestBlockedByReviewExecutorFailureError(prInfo.number);
+    }
 
     const reviewData = await getPullRequestReviewData(project, prInfo, reviewDataSelector);
     throwIfCancelled();

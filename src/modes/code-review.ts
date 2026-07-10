@@ -6,7 +6,7 @@ import {
   getPRDiff,
   getPRDiffStat,
   commentOnPR,
-  resolvePullRequestReviewAction,
+  type PRInfo,
 } from "../git.ts";
 import {
   beginPullRequestRun,
@@ -22,31 +22,6 @@ interface CodeReviewInput {
   provider?: AgentCli;
   model?: string;
   effort?: AgentOptions["effort"];
-}
-
-type ReviewDecision = "comment_only" | "request_changes";
-
-interface ParsedReviewDecision {
-  decision: ReviewDecision;
-  body: string;
-  markerCount: number;
-}
-
-const REVIEW_DECISION_MARKER_RE =
-  /<!--\s*review-decision:\s*(request_changes|comment_only)\s*-->/gi;
-
-function parseReviewDecision(result: string): ParsedReviewDecision {
-  const matches = [...result.matchAll(REVIEW_DECISION_MARKER_RE)];
-  const decision =
-    matches.length === 1 && matches[0]?.[1]?.toLowerCase() === "request_changes"
-      ? "request_changes"
-      : "comment_only";
-  const body = result.replace(REVIEW_DECISION_MARKER_RE, "").trim();
-  return {
-    decision,
-    body: body || result.trim(),
-    markerCount: matches.length,
-  };
 }
 
 const THERMO_NUCLEAR_REVIEW_PROMPT = `---
@@ -238,34 +213,57 @@ Treat these as presumptive blockers unless the author can justify them clearly:
 - the PR adds ad-hoc branching that makes an existing flow more tangled
 - the PR solves a local problem by scattering feature checks across shared code
 - the PR adds an unnecessary abstraction, wrapper, or cast-heavy contract that makes the design more indirect
-- the PR duplicates an existing helper or puts logic in the wrong layer when there is a clear canonical home
+- the PR duplicates an existing helper or puts logic in the wrong layer when there is a clear canonical home`;
 
-If those conditions are not met, leave explicit, actionable feedback and push for a cleaner decomposition.`;
+function buildPostingInstructions(pullRequest: PRInfo): string {
+  const endpoint = `/repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews`;
+  const eventGuidance = request_changes_when_needed
+    ? `Pick \`event\`:
+- \`REQUEST_CHANGES\` — the PR has at least one actionable blocking issue under the Approval Bar above.
+- \`COMMENT\` — acceptable to merge as-is, informational feedback only, or uncertain.
 
-const REVIEW_DECISION_PROMPT = `
-## Review Decision
+Do not use \`REQUEST_CHANGES\` for style nits, speculative concerns, questions without a concrete requested change, or nice-to-have refactors. If \`REQUEST_CHANGES\` is rejected (for example, because the PR author is the same as the reviewer), retry with \`COMMENT\`.`
+    : `Always set \`event\` to \`COMMENT\`.`;
 
-At the very end of your review, include exactly one machine-readable decision marker:
+  return `## Posting your review
 
-<!-- review-decision: request_changes -->
+Post exactly one review to GitHub using the \`gh api\` command. The review must include:
+- an overall \`body\` with your high-level direction and summary of findings, and
+- a \`comments\` array with inline findings anchored to specific lines in the diff.
 
-or
+${eventGuidance}
 
-<!-- review-decision: comment_only -->
+Each entry in \`comments\` must reference a line that is part of this PR's diff:
+- \`path\` — repository-relative file path (matches the diff header).
+- \`body\` — the inline finding, written directly to the author.
+- \`line\` — the line number the comment anchors to.
+- \`side\` — \`RIGHT\` for lines in the new revision (additions or context), \`LEFT\` for lines removed from the base.
+- For a multi-line range, also set \`start_line\` and \`start_side\` (\`line\`/\`side\` are the end of the range).
 
-Use \`request_changes\` when the review contains at least one actionable blocking issue that should prevent merging under the Approval Bar above.
+Prefer inline comments for anything tied to a specific location. Reserve the top-level \`body\` for cross-cutting themes, structural observations, and the overall verdict. If you have no location-specific findings, send an empty \`comments\` array.
 
-Use \`comment_only\` when the PR is acceptable to merge as-is, the feedback is optional or informational, or you are uncertain whether the issue is actually blocking.
+Write the JSON payload to a temp file and post it with:
 
-Do not use \`request_changes\` for style nits, speculative concerns, questions without a concrete requested change, or nice-to-have refactors.
+\`\`\`
+gh api --method POST ${endpoint} \\
+  --header "Accept: application/vnd.github+json" \\
+  --input <path-to-payload.json>
+\`\`\`
 
-The marker must appear exactly once, after the human-readable review body.`;
+Payload shape:
 
-function buildCodeReviewSystemPrompt(): string {
-  if (!request_changes_when_needed) return THERMO_NUCLEAR_REVIEW_PROMPT;
-  return `${THERMO_NUCLEAR_REVIEW_PROMPT}${REVIEW_DECISION_PROMPT}`;
+\`\`\`json
+{
+  "body": "<overall review markdown>",
+  "event": "COMMENT",
+  "comments": [
+    { "path": "src/foo.ts", "line": 42, "side": "RIGHT", "body": "..." }
+  ]
 }
+\`\`\`
 
+Post exactly one review. Do not commit, push, or edit any files. If the API call fails because a comment references a line that is not part of the diff, drop or re-anchor that comment and retry — do not fall back to plain \`gh pr review\`.`;
+}
 
 export async function codeReview(input: CodeReviewInput, controller: AbortController) {
   if (!input.project) throw new Error("Missing required field: project");
@@ -322,7 +320,9 @@ ${stat}
 ## Full diff
 \`\`\`diff
 ${diff}
-\`\`\``;
+\`\`\`
+
+${buildPostingInstructions(prInfo)}`;
 
     const defaults = resolveProviderDefaults("code_review", input);
     const reviewRun = await queryAgentInPRWorktree({
@@ -331,8 +331,8 @@ ${diff}
       pullRequest: prInfo,
       cli: defaults.provider,
       agentMode: "code_review",
-      access: "read-only",
-      systemPrompt: buildCodeReviewSystemPrompt(),
+      access: "all-access",
+      systemPrompt: THERMO_NUCLEAR_REVIEW_PROMPT,
       model: defaults.model,
       effort: defaults.effort,
       loadProjectSettings: true,
@@ -345,41 +345,10 @@ ${diff}
 
     logModel("codeReview", defaults.provider, `reviewer agent result:\n${result}`);
 
-    const parsedReview = request_changes_when_needed
-      ? parseReviewDecision(result)
-      : ({ decision: "comment_only", body: result.trim(), markerCount: 0 } satisfies ParsedReviewDecision);
-    if (request_changes_when_needed && parsedReview.markerCount !== 1) {
-      log(
-        "codeReview",
-        `review decision marker count was ${parsedReview.markerCount}; defaulting to comment_only`,
-      );
-    }
-
-    const requestedReviewAction =
-      parsedReview.decision === "request_changes" ? "request_changes" : "comment";
-    const reviewAction = await resolvePullRequestReviewAction({
-      project,
-      requestedAction: requestedReviewAction,
-      prAuthorLogin: prInfo.authorLogin,
-    });
-
-    await commentOnPR(
-      project,
-      input.pr,
-      parsedReview.body,
-      reviewAction,
-    ).catch((commentErr) =>
-      log("codeReview", "failed to post review comment:", commentErr),
-    );
-
-    log(
-      "codeReview",
-      `request succeeded: reviewed PR #${prInfo.number} decision=${parsedReview.decision} action=${reviewAction}`,
-    );
+    log("codeReview", `request succeeded: reviewed PR #${prInfo.number}`);
     return withRunMetadata(
       {
-        result: parsedReview.body,
-        reviewDecision: reviewAction === "request_changes" ? "request_changes" : "comment_only",
+        result,
         sessionId,
         prUrl: prInfo.url,
         prNumber: prInfo.number,

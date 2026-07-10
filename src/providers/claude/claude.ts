@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { logModel, log } from "../../logging.ts";
+import { logModel } from "../../logging.ts";
 import type { AgentAccess, AgentMode, AgentOptions, AgentRunResult, TokenUsage } from "../../agent-types.ts";
 import { DEFAULT_MAX_TURNS } from "../../agent-types.ts";
 
@@ -93,43 +93,6 @@ function summarizeMessage(msg: any): string | undefined {
   }
 }
 
-function isGithubCommentToolName(name: unknown): boolean {
-  return typeof name === "string" && name.includes("github") && name.includes("add_issue_comment");
-}
-
-function summarizeGithubCommentInput(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const record = input as Record<string, unknown>;
-  const owner = typeof record.owner === "string" ? record.owner : undefined;
-  const repo = typeof record.repo === "string" ? record.repo : undefined;
-  const issueNumber =
-    typeof record.issue_number === "number" || typeof record.issue_number === "string"
-      ? record.issue_number
-      : undefined;
-  const body = typeof record.body === "string" ? record.body : "";
-  const target = owner && repo && issueNumber ? `${owner}/${repo}#${issueNumber}` : undefined;
-  return `${target ? `target=${target} ` : ""}chars=${body.length}`;
-}
-
-function logGithubCommentToolEvents(
-  msg: any,
-  pendingGithubCommentToolIds: Set<string>,
-  logLabel?: string,
-): void {
-  const scope = logLabel ?? "claude";
-  for (const block of msg?.message?.content ?? []) {
-    if (block?.type === "tool_use" && isGithubCommentToolName(block.name)) {
-      if (typeof block.id === "string") pendingGithubCommentToolIds.add(block.id);
-      log(scope, `PR comment requested via MCP: ${summarizeGithubCommentInput(block.input)}`);
-    }
-    if (block?.type === "tool_result" && pendingGithubCommentToolIds.has(block.tool_use_id)) {
-      pendingGithubCommentToolIds.delete(block.tool_use_id);
-      const status = block.is_error ? "failed" : "posted";
-      log(scope, `PR comment ${status} via MCP`);
-    }
-  }
-}
-
 function extractModel(message: any): string | undefined {
   if (message?.type === "system" && message?.subtype === "init") {
     return message.model ?? message.data?.model;
@@ -150,12 +113,10 @@ export async function collectClaudeSdk(opts: AgentOptions, cwd: string): Promise
   let totalTokens: number | undefined;
   let totalCostUsd: number | undefined;
   let round = 0;
-  const pendingGithubCommentToolIds = new Set<string>();
 
   for await (const msg of query({ prompt: opts.prompt, options: buildSdkOptions(opts, cwd) })) {
     sessionId ??= extractSessionId(msg);
     model ??= extractModel(msg);
-    logGithubCommentToolEvents(msg, pendingGithubCommentToolIds, opts.logLabel);
 
     const summary = summarizeMessage(msg);
     if (summary) {

@@ -28,8 +28,12 @@ For EVERY section you exercise, in this exact order:
    of failure).
 2. Upload that screenshot with your screenshot upload tool to get the
    github markdown image string.
-3. add a issue comment in the given PR. for that section using your add issue comment tool, embedding
-   the uploaded image markdown in the body.
+3. Post a comment on the given PR for that section by shelling out to the
+   local \`gh\` CLI (already authenticated). Use Bash to run
+   \`gh pr comment <PR_NUMBER> --repo <OWNER>/<REPO> --body-file <path>\`
+   or \`gh api\` against
+   \`repos/<owner>/<repo>/issues/<pr>/comments\`. Embed the uploaded image
+   markdown in the body. Do not use any GitHub MCP tool — always use \`gh\`.
 
 Comment body for a WORKING section:
 - ✅ What you tested and the steps you took.
