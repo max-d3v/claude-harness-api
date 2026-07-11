@@ -339,8 +339,7 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
   };
 
   try {
-    const loadedPrInfo = await getPRInfo(project, input.pr);
-    prInfo = loadedPrInfo;
+    prInfo =await getPRInfo(project, input.pr);
     throwIfCancelled();
 
     const prHasExistingFailure = await pullRequestHasCommentOrReviewContaining(

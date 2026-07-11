@@ -43,7 +43,7 @@ function buildMcpServers(): Record<string, McpServerConfig> {
     imageUploader: imageServer,
   };
 }
-const MCP_TOOLS_ALLOWED = ["mcp__playwright", "mcp__imageUploader", "Bash"];
+const MCP_TOOLS_ALLOWED = ["mcp__playwright", "mcp__imageUploader"];
 const QA_TESTER_TOOLS: AgentOptions["tools"] = ["Read", "Glob", "Grep", "Bash"];
 
 function resolveTargetUrls(input: CodeTestInput): string[] {
