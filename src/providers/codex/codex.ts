@@ -127,21 +127,6 @@ function summarizeCodexEvent(event: ThreadEvent): string | undefined {
   }
 }
 
-function logGithubCommentEvent(event: ThreadEvent, logLabel?: string): void {
-  switch (event.type) {
-    case "item.started":
-    case "item.updated":
-    case "item.completed": {
-      const item = event.item;
-      if (item.type !== "mcp_tool_call") return;
-      if (item.server !== "github" || item.tool !== "add_issue_comment") return;
-
-      const prefix = event.type.replace("item.", "");
-      log(logLabel ?? "codex", `PR comment ${prefix} via MCP: status=${item.status}`);
-    }
-  }
-}
-
 export async function collectCodexSdk(opts: AgentOptions, cwd: string): Promise<AgentRunResult> {
   const bypassCodexApprovals = shouldBypassCodexApprovals(opts);
   if (bypassCodexApprovals) {
@@ -170,7 +155,6 @@ export async function collectCodexSdk(opts: AgentOptions, cwd: string): Promise<
   let totalTokens: number | undefined;
 
   for await (const event of events) {
-    logGithubCommentEvent(event, opts.logLabel);
     logModel(opts.logLabel, "codex", summarizeCodexEvent(event));
     if (event.type === "turn.failed") {
       throw new Error(event.error.message);

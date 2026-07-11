@@ -15,6 +15,7 @@ import {
   getPRInfo,
   getPullRequestReviewData,
   getWorktreeStatus,
+  pullRequestHasCommentOrReviewContaining,
   type PullRequestReviewData,
   type PRInfo,
 } from "../git.ts";
@@ -46,7 +47,11 @@ type ReviewDataSelector =
   | { kind: "comment"; commentId: string | number }
   | { kind: "review"; reviewId: string | number };
 
-const REVIEW_EXECUTOR_SYSTEM_PROMPT = `You are a review executor for GitHub pull requests.
+const REVIEW_EXECUTOR_FAILURE_MARKER = "<!-- claude-harness:review-executor:failure -->";
+const UNCLEAN_WORKTREE_FAILURE_MARKER = "<!-- claude-harness:review-executor:unclean-worktree -->";
+
+const REVIEW_EXECUTOR_SYSTEM_PROMPT = `
+You are a review executor for GitHub pull requests.
 
 You receive the review/comment payload that triggered this run, plus PR context.
 
@@ -61,6 +66,34 @@ no findings
 applicable changes applied
 
 Do not include markdown, explanation, a summary, a diff, or any extra text in the final response.`;
+
+class UncleanPullRequestWorktreeError extends Error {
+  constructor(
+    readonly worktree: string,
+    readonly status: string,
+  ) {
+    super(
+      `PR worktree is not clean before review executor run; refusing to mix existing changes:\n${status}`,
+    );
+    this.name = "UncleanPullRequestWorktreeError";
+  }
+}
+
+class PreviousReviewExecutorFailureReportError extends Error {
+  constructor(readonly selectorLabel: string) {
+    super(`Review executor will not rerun a previous failure report: ${selectorLabel}`);
+    this.name = "PreviousReviewExecutorFailureReportError";
+  }
+}
+
+class PullRequestBlockedByReviewExecutorFailureError extends Error {
+  constructor(readonly prNumber: number) {
+    super(
+      `PR #${prNumber} has an unresolved review executor failure comment; refusing to run. Delete the failure comment (or erase its hidden marker) to re-enable execution.`,
+    );
+    this.name = "PullRequestBlockedByReviewExecutorFailureError";
+  }
+}
 
 function normalizeId(id: string | number | undefined): string | number | undefined {
   if (typeof id === "number" && Number.isFinite(id)) return id;
@@ -166,6 +199,14 @@ function hasReviewDataContent(reviewData: PullRequestReviewData): boolean {
   return reviewData.reviewComments?.some((reviewComment) => reviewComment.body.trim()) ?? false;
 }
 
+function hasReviewExecutorFailureMarker(reviewData: PullRequestReviewData): boolean {
+  const markers = [REVIEW_EXECUTOR_FAILURE_MARKER, UNCLEAN_WORKTREE_FAILURE_MARKER];
+  if (markers.some((marker) => reviewData.body.includes(marker))) return true;
+  return reviewData.reviewComments?.some((reviewComment) =>
+    markers.some((marker) => reviewComment.body.includes(marker)),
+  ) ?? false;
+}
+
 function buildReviewExecutorPrompt(input: {
   pullRequest: PRInfo;
   reviewData: PullRequestReviewData;
@@ -212,9 +253,57 @@ function buildFailureComment(message: string): string {
 
 The review executor could not complete the requested changes.
 
+If you want the review executor to run on this PR again, delete this comment or erase its hidden marker.
+
 \`\`\`
 ${clipForComment(message)}
 \`\`\``;
+}
+
+async function shouldPostFailureComment(input: {
+  err: unknown;
+  project: string;
+  pullRequest: PRInfo | null;
+}): Promise<boolean> {
+  if (input.err instanceof PreviousReviewExecutorFailureReportError) {
+    log(
+      "reviewExecutor",
+      `not posting failure comment: ${input.err.selectorLabel} is already a review-executor failure report`,
+    );
+    return false;
+  }
+
+  if (input.err instanceof PullRequestBlockedByReviewExecutorFailureError) {
+    log(
+      "reviewExecutor",
+      `not posting failure comment: PR #${input.err.prNumber} already has an unresolved review-executor failure comment`,
+    );
+    return false;
+  }
+
+  if (!(input.err instanceof UncleanPullRequestWorktreeError) || !input.pullRequest) {
+    return true;
+  }
+
+  const alreadyPosted = await pullRequestHasCommentOrReviewContaining(
+    input.project,
+    input.pullRequest,
+    UNCLEAN_WORKTREE_FAILURE_MARKER,
+  ).catch((err) => {
+    log("reviewExecutor", "failed to check for existing unclean worktree failure comment:", err);
+    return false;
+  });
+
+  return !alreadyPosted;
+}
+
+function buildFailureCommentForError(err: unknown, message: string): string {
+  const markers = [REVIEW_EXECUTOR_FAILURE_MARKER];
+  if (err instanceof UncleanPullRequestWorktreeError) {
+    markers.push(UNCLEAN_WORKTREE_FAILURE_MARKER);
+  }
+
+  return `${markers.join("\n")}\n\n${buildFailureComment(message)}`;
 }
 
 function reviewDataUserSource(reviewData: PullRequestReviewData): GitHubUserSource {
@@ -240,6 +329,7 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
 
   let cleanupPRHeadBranchCwd: () => Promise<void> = async () => {};
   let prHeadBranchCwd: string | null = null;
+  let prInfo: PRInfo | null = null;
   let preserveWorktree = false;
 
   const throwIfCancelled = () => {
@@ -249,15 +339,27 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
   };
 
   try {
-    const [prInfo, diff, stat] = await Promise.all([
-      getPRInfo(project, input.pr),
-      getPRDiff(project, input.pr),
-      getPRDiffStat(project, input.pr),
-    ]);
+    prInfo =await getPRInfo(project, input.pr);
     throwIfCancelled();
+
+    const prHasExistingFailure = await pullRequestHasCommentOrReviewContaining(
+      project,
+      prInfo,
+      REVIEW_EXECUTOR_FAILURE_MARKER,
+    );
+    throwIfCancelled();
+    if (prHasExistingFailure) {
+      throw new PullRequestBlockedByReviewExecutorFailureError(prInfo.number);
+    }
 
     const reviewData = await getPullRequestReviewData(project, prInfo, reviewDataSelector);
     throwIfCancelled();
+
+    if (hasReviewExecutorFailureMarker(reviewData)) {
+      throw new PreviousReviewExecutorFailureReportError(
+        `PR #${prInfo.number} ${reviewDataSelectorLabel(reviewDataSelector)}`,
+      );
+    }
 
     if (!hasReviewDataContent(reviewData)) {
       log(
@@ -277,6 +379,12 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
       );
     }
 
+    const [diff, stat] = await Promise.all([
+      getPRDiff(project, input.pr),
+      getPRDiffStat(project, input.pr),
+    ]);
+    throwIfCancelled();
+
     const prHeadBranchContext = await getOrCreatePRHeadBranchCwd({
       cwd: project,
       pullRequest: prInfo,
@@ -287,9 +395,7 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
     const initialStatus = await getWorktreeStatus(prHeadBranchCwd);
     if (initialStatus) {
       preserveWorktree = true;
-      throw new Error(
-        `PR worktree is not clean before review executor run; refusing to mix existing changes:\n${initialStatus}`,
-      );
+      throw new UncleanPullRequestWorktreeError(prHeadBranchCwd, initialStatus);
     }
 
     await fastForwardPullRequestHeadWorktree(prHeadBranchCwd, prInfo);
@@ -414,9 +520,11 @@ export async function reviewExecutor(input: ReviewExecutorInput, controller: Abo
 
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log("reviewExecutor", `request failed:\n${message}`);
-    await commentOnPR(project, input.pr, buildFailureComment(message)).catch((commentErr) =>
-      log("reviewExecutor", "failed to post error comment:", commentErr),
-    );
+    if (await shouldPostFailureComment({ err, project, pullRequest: prInfo })) {
+      await commentOnPR(project, input.pr, buildFailureCommentForError(err, message)).catch((commentErr) =>
+        log("reviewExecutor", "failed to post error comment:", commentErr),
+      );
+    }
     throw err;
   } finally {
     if (preserveWorktree) {

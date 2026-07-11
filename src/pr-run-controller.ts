@@ -31,8 +31,8 @@ export class SupersededPullRequestRunError extends Error {
 
 const activePullRequestRuns = new Map<string, ActivePullRequestRun>();
 
-function runKey(project: string, pr: string | number): string {
-  return `${project}:${String(pr)}`;
+function runKey(kind: PullRequestRunKind, project: string, pr: string | number): string {
+  return `${kind}:${project}:${String(pr)}`;
 }
 
 function abortRequest(controller: AbortController, reason: unknown): void {
@@ -47,7 +47,7 @@ export function beginPullRequestRun(input: {
   pr: string | number;
   controller: AbortController;
 }): PullRequestRun {
-  const key = runKey(input.project, input.pr);
+  const key = runKey(input.kind, input.project, input.pr);
   const startedAt = new Date();
   const previous = activePullRequestRuns.get(key);
   const replacedExisting = Boolean(previous && !previous.controller.signal.aborted);

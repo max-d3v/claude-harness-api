@@ -21,8 +21,6 @@ import { imageServer } from "../tools/screenshot-upload.ts";
 import { resolveTesterSystemPrompt } from "../providers/index.ts";
 import { withRunMetadata } from "../telemetry.ts";
 
-const githubEnv = process.env.GITHUB_TOKEN_USER;
-
 interface CodeTestInput {
   project: string;
   pr: string | number;
@@ -37,27 +35,16 @@ interface CodeTestInput {
 }
 
 function buildMcpServers(): Record<string, McpServerConfig> {
-  if (!githubEnv) {
-    throw new Error("GITHUB_TOKEN is required for /mode/code-test so the QA agent can post PR comments.");
-  }
-
   return {
     playwright: {
       command: "npx",
       args: ["-y", "@playwright/mcp@latest", "--headless", "--isolated"],
     },
     imageUploader: imageServer,
-    github: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: {
-        GITHUB_PERSONAL_ACCESS_TOKEN: githubEnv,
-      },
-    },
   };
 }
-const MCP_TOOLS_ALLOWED = ["mcp__playwright", "mcp__imageUploader", "mcp__github__add_issue_comment"];
-const QA_DEV_SERVER_TOOLS: AgentOptions["tools"] = ["Read", "Glob", "Grep", "Bash"];
+const MCP_TOOLS_ALLOWED = ["mcp__playwright", "mcp__imageUploader"];
+const QA_TESTER_TOOLS: AgentOptions["tools"] = ["Read", "Glob", "Grep", "Bash"];
 
 function resolveTargetUrls(input: CodeTestInput): string[] {
   const urls = [
@@ -168,7 +155,7 @@ ${diff}
       cli: defaults.provider,
       agentMode: "qa_tester",
       access: "read-only",
-      tools: testUrls.length === 0 ? QA_DEV_SERVER_TOOLS : undefined,
+      tools: QA_TESTER_TOOLS,
       systemPrompt: resolveTesterSystemPrompt(defaults.provider),
       mcpServers: buildMcpServers(),
       allowedTools: MCP_TOOLS_ALLOWED,

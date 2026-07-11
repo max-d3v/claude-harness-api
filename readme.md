@@ -37,11 +37,9 @@ TOKEN="$RAW_TOKEN" perl -0pi -e 's/^CODING_HARNESS_API_TOKEN=.*/CODING_HARNESS_A
 
 The printed `RAW_TOKEN` is the value clients send in the `Authorization` header. If GitHub Actions calls this API, save the same token as a repository secret named `coding_harness_api_token`.
 
-For QA mode, add a GitHub personal access token to `.env`:
-
-```env
-GITHUB_TOKEN_USER=github_pat_...
-```
+For QA mode, make sure the local `gh` CLI is authenticated (`gh auth status`).
+The QA agent posts PR comments by shelling out to `gh`, so no dedicated
+`GITHUB_TOKEN_USER` env variable is required anymore.
 
 Start the API:
 
@@ -128,9 +126,8 @@ QA runs are read-only against the repository. The tester can inspect files for c
 
 - `playwright`: `npx -y @playwright/mcp@latest --headless --isolated` for browser navigation and screenshots.
 - `imageUploader`: an in-process MCP server exposing `upload_screenshot`, which runs `npx gitshot <path>` and returns a GitHub Markdown image string.
-- `github`: `npx -y @modelcontextprotocol/server-github` with `GITHUB_PERSONAL_ACCESS_TOKEN` set from `GITHUB_TOKEN_USER`, used to post PR comments.
 
-The tester is only allowlisted for Playwright MCP tools, `mcp__imageUploader`, and `mcp__github__add_issue_comment`. No-URL runs also expose shell access so the tester can start the dev server and shut it down at the end of execution.
+The tester is allowlisted for Playwright MCP tools, `mcp__imageUploader`, and `Bash`. PR comments are posted by shelling out to the local `gh` CLI (which must be authenticated) rather than through a GitHub MCP server. Bash access also lets no-URL runs start the dev server and shut it down at the end of execution.
 
 ### Codex QA provider requirements
 
@@ -139,7 +136,7 @@ As of 2026-06-16, Claude receives the QA `mcpServers` object directly through th
 For Codex QA, make sure the Codex provider exposes all of the same QA capabilities:
 
 - Playwright MCP for browser navigation and screenshots.
-- GitHub MCP with `GITHUB_TOKEN_USER`/`GITHUB_PERSONAL_ACCESS_TOKEN` for `add_issue_comment`.
+- Shell access to the local `gh` CLI so the tester can post PR comments via `gh pr comment` / `gh api`.
 - The image upload MCP, or an equivalent `$gitshot` skill path, so screenshots can become GitHub Markdown images.
 - The local `$gitshot` skill itself. The provider-local skill definition lives at `src/providers/codex/SKILL.md`; add/install that skill into Codex through Codex plugins so the Codex runtime can actually call `$gitshot`.
 
